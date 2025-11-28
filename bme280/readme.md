@@ -1,7 +1,7 @@
 # WARNING: This Code is still testing
 
 # HAL Configuration
-The STM32 I used for driving WS2812 matrix screen is STM32F103C8T6.
+The STM32 I used for driving ome280 is STM32F103C8T6.
 
 ## Clock Configuration
 
