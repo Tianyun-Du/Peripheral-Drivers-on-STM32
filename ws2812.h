@@ -1,7 +1,7 @@
 /*
 @Author Tianyun Du
 @Date 2025/11/28
-
+@Email tyndu1996@gmail.com
 */
 #ifndef __WS2812_H_
 #define __WS2812_H_
