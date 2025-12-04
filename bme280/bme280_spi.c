@@ -1,10 +1,13 @@
 /*
-@Author Tianyun Du
-@Date 2025/11/28
-@Email tyndu1996@gmail.com
+The data parse function is from the API of BOSCH.
+https://github.com/boschsensortec/BME280_SensorAPI
 */
 
-#include "bme280_spi.h"
+#include "bme280.h"
+
+SPI_HandleTypeDef *hspi_ome280 = &hspi2;
+GPIO_TypeDef *BME280_CS_GPIO_Port = GPIOB;
+uint16_t BME280_CS_Pin = GPIO_PIN_12;
 
 static uint8_t set_bit(uint8_t value, uint8_t bitIndex, uint8_t bitValue)
 {
@@ -18,605 +21,370 @@ static uint8_t set_bit(uint8_t value, uint8_t bitIndex, uint8_t bitValue)
     return value;
 };
 
-static HAL_StatusTypeDef bme280_Set_SensorMode(BME280_MODE mode_f){
-	HAL_StatusTypeDef status;
-	//change the BIT1 and BIT0 of ctrl_meas register
-	uint8_t reg_addr_write = set_bit(bme280_ctrl_meas_addr,7,0);
-	uint8_t reg_addr_read = bme280_ctrl_meas_addr;
-	
-	uint8_t tx_buffer[2] = {0};
-	uint8_t rx_buffer[2] = {0};
-	
-	tx_buffer[0] = reg_addr_read;
-	
-	//read the value of ctrl_meas register first, then change the bit of BIT1 & BIT0, the other bit reserved
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET); //LOW THE CS PIN
-	status = HAL_SPI_TransmitReceive(hspi_ome280,tx_buffer,rx_buffer,2,HAL_MAX_DELAY);
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
-	
-	//2025-11-23 assume rx_buffer[1] is the data received from OME280
-	switch(mode_f){
-		case(BME280_MODE_SLEEP):
-			//sleep is 00
-			tx_buffer[1] = set_bit(rx_buffer[1],1,0);
-			tx_buffer[1] = set_bit(rx_buffer[1],0,0);
-			break;	
-		case(BME280_MODE_FORCE):
-			//force is 01 or 10
-			tx_buffer[1] = set_bit(rx_buffer[1],1,1);
-			tx_buffer[1] = set_bit(rx_buffer[1],0,0);			
-			break;
-		case(BME280_MODE_NORMAL):
-			//normal is 11
-			tx_buffer[1] = set_bit(rx_buffer[1],1,1);
-			tx_buffer[1] = set_bit(rx_buffer[1],0,1);		
-			break;
-	};
-	
-	tx_buffer[0] = reg_addr_write;
-	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
-	status = HAL_SPI_TransmitReceive(hspi_ome280,tx_buffer,rx_buffer,2,HAL_MAX_DELAY);
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
-	return status;
-};
+static HAL_StatusTypeDef bme280_read_reg(uint8_t reg_addr, uint8_t *reg_data, uint8_t length){
+    //ADDR Auto Incremented
+    //Set Buffer
+    uint8_t tx_buffer[length+1] = {0};
+    uint8_t rx_buffer[length+1] = {0};
 
-static HAL_StatusTypeDef bme280_Set_Config(BME280_T_STANDBY standby_f, BME280_IIR_FILTER filter_f, BME280_SET_SPI spi_f){
-	//write bits to config register
-	uint8_t reg_addr_write = set_bit(bme280_config_addr,7,0);
-	uint8_t reg_addr_read = bme280_config_addr;
-	
-	uint8_t tx_buffer[2] = {0};
-	tx_buffer[0] = reg_addr_write;
-	
-	//standby BIT7~BIT5
-	switch(standby_f){
-		case(BME280_T_STANDBY_0_5):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,0);
-			break;
-		case(BME280_T_STANDBY_62_5):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,1);			
-			break;
-		case(BME280_T_STANDBY_125):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,0);			
-			break;
-		case(BME280_T_STANDBY_250):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,1);			
-			break;
-		case(BME280_T_STANDBY_500):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,0);			
-			break;
-		case(BME280_T_STANDBY_1000):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,1);
-			break;
-		case(BME280_T_STANDBY_10):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,0);			
-			break;
-		case(BME280_T_STANDBY_20):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,1);			
-			break;
-	};
-	
-	//standby BIT4~BIT2
-	switch(filter_f){
-		case(BME280_IIR_OFF):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);			
-			break;
-		case(BME280_IIR_2):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,1);	
-			break;
-		case(BME280_IIR_4):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);				
-			break;
-		case(BME280_IIR_8):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,1);				
-			break;
-		case(BME280_IIR_16):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);				
-			break;
-	};
-	
-	//set SPI wire, BIT0
-	switch(spi_f){
-		case(BME280_SPI_3_WIRE):
-			tx_buffer[1] = set_bit(tx_buffer[1],0,1);
-			break;
-		case(BME280_SPI_4_WIRE):
-			tx_buffer[1] = set_bit(tx_buffer[1],0,0);
-			break;
-	};
-	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
-	HAL_StatusTypeDef status = HAL_SPI_Transmit(hspi_ome280,tx_buffer,2,HAL_MAX_DELAY);
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
-};
+    //Set Read Reg Addr
+    tx_buffer[0] = reg_addr;
 
-
-static HAL_StatusTypeDef bme280_Set_OversamplingSettings
-	(BME280_HUM_OVRS hum_ovrs_f,BME280_TEMP_OVRS temp_ovrs_f,BME280_PRESS_OVRS press_ovrs_f, BME280_MODE mode_f){
-
-	uint8_t reg_addr_write = set_bit(bme280_ctrl_hum_addr,7,0);
-	uint8_t reg_addr_read = bme280_ctrl_hum_addr;
-		
-	uint8_t tx_buffer[2]={0};
-	tx_buffer[0] = reg_addr_write;
-
-	switch(hum_ovrs_f){
-		//BIT2~BIT0
-		case(BME280_HUM_OVRS_SKIP):
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],1,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],0,0);
-			break;
-		case(BME280_HUM_OVRS_X1):
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],1,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],0,1);			
-			break;
-		case(BME280_HUM_OVRS_X2):
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],1,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],0,0);			
-			break;
-		case(BME280_HUM_OVRS_X4):
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],1,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],0,1);			
-			break;
-		case(BME280_HUM_OVRS_X8):
-			tx_buffer[1] = set_bit(tx_buffer[1],2,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],1,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],0,0);			
-			break;
-		case(BME280_HUM_OVRS_X16):
-			tx_buffer[1] = set_bit(tx_buffer[1],2,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],1,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],0,1);			
-			break;
-	};
-	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
-	HAL_StatusTypeDef status = HAL_SPI_Transmit(hspi_ome280,tx_buffer,2,HAL_MAX_DELAY);
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
-		
-	reg_addr_write = set_bit(bme280_ctrl_meas_addr,7,0);
-	reg_addr_read = bme280_ctrl_meas_addr;
-	
-	tx_buffer[0] = reg_addr_write;
-
-	//set oversampling of temp
-	switch(temp_ovrs_f){
-		//BIT7~5
-		case(BME280_TEMP_OVRS_SKIP):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,0);
-			break;
-		case(BME280_TEMP_OVRS_X1):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,1);			
-			break;
-		case(BME280_TEMP_OVRS_X2):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,0);			
-			break;
-		case(BME280_TEMP_OVRS_X4):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,1);			
-			break;
-		case(BME280_TEMP_OVRS_X8):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,0);			
-			break;
-		case(BME280_TEMP_OVRS_X16):
-			tx_buffer[1] = set_bit(tx_buffer[1],7,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],6,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],5,1);			
-			break;
-	};
-	//set oversampling of pressure
-	switch(press_ovrs_f){
-		//BIT4~2
-		case(BME280_PRESS_OVRS_SKIP):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);
-			break;
-		case(BME280_PRESS_OVRS_X1):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,1);			
-			break;
-		case(BME280_PRESS_OVRS_X2):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);			
-			break;
-		case(BME280_PRESS_OVRS_X4):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,1);			
-			break;
-		case(BME280_PRESS_OVRS_X8):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,0);			
-			break;
-		case(BME280_PRESS_OVRS_X16):
-			tx_buffer[1] = set_bit(tx_buffer[1],4,1);
-			tx_buffer[1] = set_bit(tx_buffer[1],3,0);
-			tx_buffer[1] = set_bit(tx_buffer[1],2,1);			
-			break;
-	};
-	
-	//set mode
-	switch(mode_f){
-		//BIT1~0
-		case(BME280_MODE_SLEEP):
-			tx_buffer[1] = set_bit(tx_buffer[1],1,0);	
-			tx_buffer[1] = set_bit(tx_buffer[1],0,0);	
-			break;
-		case(BME280_MODE_FORCE):
-			tx_buffer[1] = set_bit(tx_buffer[1],1,0);	
-			tx_buffer[1] = set_bit(tx_buffer[1],0,1);				
-			break;
-		case(BME280_MODE_NORMAL):
-			tx_buffer[1] = set_bit(tx_buffer[1],1,1);	
-			tx_buffer[1] = set_bit(tx_buffer[1],0,1);				
-			break;
-	};
-	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);	
-	status = HAL_SPI_Transmit(hspi_ome280,tx_buffer,2,HAL_MAX_DELAY);	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);		
-	
-	return status;
-};
-	
-
-HAL_StatusTypeDef bme280_Init(BME_280_OPERATION_MODE operation_mode_f){
-	//this function set the operation mode and read the calibration data to variables.
-	
-	//set operation mode
-	switch(operation_mode_f){
-		case(BME_280_OPERATION_MODE_WEATHER_MONITORING):
-			//force mode, 1sample per minute
-			//oversampling: pressure x1, temperature x1, humidity x1;
-			//IIR filter: off
-			bme280_Set_OversamplingSettings(BME280_HUM_OVRS_X1,BME280_TEMP_OVRS_X1,BME280_PRESS_OVRS_X1,BME280_MODE_FORCE);
-			bme280_Set_Config(BME280_T_STANDBY_1000,BME280_IIR_OFF,BME280_SPI_4_WIRE);
-			//The parameter "stanby time" is not effective while the mode is FORCE
-			//After Init, run bme280_Set_SensorMode(BME280_MODE_FORCE) once a min to acquire data.
-			break;
-		case(BME_280_OPERATION_MODE_HUMIDITY_SENSING):
-			//force mode, 1sample per second
-			//oversampling: pressure skip, temperature x1, humidity x1;
-			//IIR filter:off
-			bme280_Set_OversamplingSettings(BME280_HUM_OVRS_X1,BME280_TEMP_OVRS_X1,BME280_PRESS_OVRS_SKIP,BME280_MODE_FORCE);
-			bme280_Set_Config(BME280_T_STANDBY_1000,BME280_IIR_OFF,BME280_SPI_4_WIRE);			
-			//The parameter "stanby time" is not effective while the mode is FORCE
-			//After Init, run bme280_Set_SensorMode(BME280_MODE_FORCE) once a min to acquire data.
-			break;
-		case(BME_280_OPERATION_MODE_INDOOR_NAVIGATION):
-			//normal mode, standby time 0.5ms
-			//oversampling: pressure x16, temperature x2, humidity x1;
-			//IIR filter: filter coefficient 16		
-			bme280_Set_OversamplingSettings(BME280_HUM_OVRS_X1,BME280_TEMP_OVRS_X2,BME280_PRESS_OVRS_X16,BME280_MODE_NORMAL);
-			bme280_Set_Config(BME280_T_STANDBY_0_5,BME280_IIR_16,BME280_SPI_4_WIRE);				
-			break;
-		case(BME_280_OPERATION_MODE_GAMING):
-			//normal mode, standby time 0.5ms
-			//oversampling: pressure x4, temperature x1, humidity skip;
-			bme280_Set_OversamplingSettings(BME280_HUM_OVRS_SKIP,BME280_TEMP_OVRS_X1,BME280_PRESS_OVRS_X4,BME280_MODE_NORMAL);
-			bme280_Set_Config(BME280_T_STANDBY_0_5,BME280_IIR_16,BME280_SPI_4_WIRE);		
-			break;
-	};
-	
-	//read calibrate data
-	bme280_Read_Calibration();
-};
-
-BME280_STATUS bme280_Read_Measuring_Status(void){
-	/*
-	addr of status register is 0xF3
-	BIT3: measuring; BIT0: IM_UPDATE
-	*/
-	uint8_t reg_addr_read = bme280_status_addr;
-	
-	uint8_t tx_buffer[2] = {0};
-	uint8_t rx_buffer[2] = {0};
-	
-	tx_buffer[0] = reg_addr_read;
-	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
-	HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(hspi_ome280,tx_buffer,rx_buffer,2,HAL_MAX_DELAY);	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
-	
-	if( (rx_buffer[1] & 0x08)>>3 == 0) return BME280_STATUS_MEASURING;
-	if( (rx_buffer[1] & 0x08)>>3 == 1) return BME280_STATUS_NOT_MEASURING;
-	
-};
-
-BME280_STATUS bme280_Read_UPDATE_Status(void){
-	/*
-	addr of status register is 0xF3
-	BIT3: measuring; BIT0: IM_UPDATE
-	*/
-	uint8_t reg_addr_read = bme280_status_addr;
-	
-	uint8_t tx_buffer[2] = {0};
-	uint8_t rx_buffer[2] = {0};
-	
-	tx_buffer[0] = reg_addr_read;
-
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
-	HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(hspi_ome280,tx_buffer,rx_buffer,2,HAL_MAX_DELAY);	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
-	
-	if( (rx_buffer[1] & 0x01)>>0 == 0) return BME280_STATUS_IM_UPDATE;
-	if( (rx_buffer[1] & 0x01)>>0 == 1) return BME280_STATUS_NOT_IM_UPDATE;
-	
-};
-
-//read hum, press and temp raw data
-void bme280_ReadData_to_RAW(void){
-	uint8_t reg_addr_read = bme280_ctrl_hum_addr;
-	
-	uint8_t tx_buffer[9] = {0};
-	uint8_t rx_buffer[9] = {0};
-	
-	tx_buffer[0] = reg_addr_read;
-	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
-	HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(hspi_ome280,tx_buffer,rx_buffer,9,HAL_MAX_DELAY);
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);
-
-/*
-PRESSURE RAW DATA
-msb[7:0] -> [19:12]
-lsb[7:0] -> [11:4]
-xlsb[7:4] -> [3:0]
-*/
-	uint8_t press_msb = (uint32_t)rx_buffer[1] << 12;
-	uint8_t press_lsb = (uint32_t)rx_buffer[2] << 4;
-	uint8_t press_xlsb = (uint32_t)rx_buffer[3] >> 4;
-	bme_280_raw_data.press_raw = press_msb | press_lsb | press_xlsb;
-	
-/*
-TEMPERATURE RAW DATA
-msb[7:0] -> [19:12]
-lsb[7:0] -> [11:4]
-xlsb[7:4] -> [3:0]
-*/	
-	uint8_t temp_msb = (uint32_t)rx_buffer[4] << 12;
-	uint8_t temp_lsb = (uint32_t)rx_buffer[5] << 4;
-	uint8_t temp_xlsb = (uint32_t)rx_buffer[6] >> 4;
-	bme_280_raw_data.temp_raw = temp_msb | temp_lsb | temp_xlsb;
-	
-/*
-HUMIDITY RAW DATA
-msb[7:0] -> [15:8]
-lsb[7:0] -> [7:0]
-*/	
-	uint8_t hum_msb = (uint32_t)rx_buffer[7] << 8;
-	uint8_t hum_lsb = rx_buffer[8];
-	bme_280_raw_data.hum_raw = hum_msb | hum_lsb;
-	
-};
-
-//read calibration data once
-static void bme280_Read_Calibration(void){
-	
-/*
-read temperature and pressure calibration data	
-*/	
-	uint8_t reg_addr_read = 0x88;
-
-	uint8_t tx_buffer[25] = {0};
-	uint8_t rx_buffer[25] = {0};
-
-	tx_buffer[0] = reg_addr_read;
-	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
-	HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(hspi_ome280,tx_buffer,rx_buffer,25,HAL_MAX_DELAY);
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);	
-
-	bme_280_calibration_data.comp_dig_T1 = (uint16_t)rx_buffer[2]<<8 | (uint16_t)rx_buffer[1];
-	bme_280_calibration_data.comp_dig_T2 = (int16_t) ((uint16_t)rx_buffer[4]<<8 | (uint16_t)rx_buffer[3]);
-	bme_280_calibration_data.comp_dig_T3 = (int16_t) ((uint16_t)rx_buffer[6]<<8 | (uint16_t)rx_buffer[5]);
-	bme_280_calibration_data.comp_dig_P1 = (uint16_t)rx_buffer[8]<<8 | (uint16_t)rx_buffer[7];
-	bme_280_calibration_data.comp_dig_P2 = (int16_t) ((uint16_t)rx_buffer[10]<<8 | (uint16_t)rx_buffer[9]);
-	bme_280_calibration_data.comp_dig_P3 = (int16_t) ((uint16_t)rx_buffer[12]<<8 | (uint16_t)rx_buffer[11]);
-	bme_280_calibration_data.comp_dig_P4 = (int16_t) ((uint16_t)rx_buffer[14]<<8 | (uint16_t)rx_buffer[13]);
-	bme_280_calibration_data.comp_dig_P5 = (int16_t) ((uint16_t)rx_buffer[16]<<8 | (uint16_t)rx_buffer[15]);
-	bme_280_calibration_data.comp_dig_P6 = (int16_t) ((uint16_t)rx_buffer[18]<<8 | (uint16_t)rx_buffer[17]);
-	bme_280_calibration_data.comp_dig_P7 = (int16_t) ((uint16_t)rx_buffer[20]<<8 | (uint16_t)rx_buffer[19]);
-	bme_280_calibration_data.comp_dig_P8 = (int16_t) ((uint16_t)rx_buffer[22]<<8 | (uint16_t)rx_buffer[21]);
-	bme_280_calibration_data.comp_dig_P9 = (int16_t) ((uint16_t)rx_buffer[24]<<8 | (uint16_t)rx_buffer[23]);
-
-/*
-read humidity calibration data	
-*/	
-
-	reg_addr_read = 0xA1;
-
-	uint8_t tx_buffer_1[2] = {0};
-	uint8_t rx_buffer_1[2] = {0};
-
-	tx_buffer_1[0] = reg_addr_read;
-
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
-	status = HAL_SPI_TransmitReceive(hspi_ome280,tx_buffer_1,rx_buffer_1,2,HAL_MAX_DELAY);
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);	
-	
-	bme_280_calibration_data.comp_dig_H1 = rx_buffer_1[1];
-	
-	reg_addr_read = 0xE1;	
-	
-	uint8_t tx_buffer_2[8] = {0};
-	uint8_t rx_buffer_2[8] = {0};	
-	
-	tx_buffer_2[0] = reg_addr_read;
-	
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_RESET);
-	status = HAL_SPI_TransmitReceive(hspi_ome280,tx_buffer_2,rx_buffer_2,8,HAL_MAX_DELAY);
-	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12,GPIO_PIN_SET);	
-	
-	bme_280_calibration_data.comp_dig_H2 = (int16_t) ((uint16_t)rx_buffer_2[2]<<8 | (uint16_t)rx_buffer_2[1]);
-	bme_280_calibration_data.comp_dig_H3 = rx_buffer_2[3];
-	int16_t dig_h4_msb;
-	int16_t dig_h4_lsb;
-	dig_h4_msb = (int16_t)(int8_t)rx_buffer_2[4] * 16;
-	dig_h4_lsb = (int16_t)(rx_buffer_2[5] & 0x0F);
-	bme_280_calibration_data.comp_dig_H4 = dig_h4_msb | dig_h4_lsb;
-	int16_t dig_h5_msb;
-	int16_t dig_h5_lsb;
-	dig_h5_msb = (int16_t)(int8_t)rx_buffer_2[6] * 16;
-	dig_h5_lsb = (int16_t)(rx_buffer_2[5] >> 4);
-	bme_280_calibration_data.comp_dig_H5 = dig_h5_msb | dig_h5_lsb;
-	bme_280_calibration_data.comp_dig_H6 = (int8_t)rx_buffer_2[7];
-	
-};
-
-
-//compensate the data
-static int32_t bme280_Read_Temperature(void){
-
-	int32_t var1;
-	int32_t var2;
-	int32_t temperature;
-	int32_t temperature_min = -4000;
-	int32_t temperature_max = 8500;
-	
-	var1 = (int32_t)((bme_280_raw_data.temp_raw / 8) - ((int32_t)bme_280_calibration_data.comp_dig_T1*2));
-	//2025-11-24 uint32_t - int32_t ???
-	var1 = (var1*((int32_t)bme_280_calibration_data.comp_dig_T2)) / 2048;
-	
-	var2 = (int32_t)((bme_280_raw_data.temp_raw / 16) - ((int32_t)bme_280_calibration_data.comp_dig_T1));
-	var2 = (((var2*var2) / 4096) * ((int32_t)bme_280_calibration_data.comp_dig_T3)) / 16384;
-	
-	bme_280_calibration_data.t_fine = var1 + var2;
-	temperature = (bme_280_calibration_data.t_fine * 5 + 128) / 256;
-	
-	if (temperature < temperature_min){
-		return temperature_min;
-	}
-	else if (temperature > temperature_max){
-		return temperature_max;
-	};
-	return temperature;
-
-};
-
-static uint32_t bme280_Read_Pressure(void){
-  int64_t var1;
-  int64_t var2;
-  int64_t var3;
-  int64_t var4;
-  uint32_t pressure;
-  uint32_t pressure_min = 3000000;
-  uint32_t pressure_max = 11000000;
-
-  var1 = ((int64_t)bme_280_calibration_data.t_fine) - 128000;
-  var2 = var1 * var1 * (int64_t)bme_280_calibration_data.comp_dig_P6;
-  var2 = var2 + ((var1 * (int64_t)bme_280_calibration_data.comp_dig_P5) * 131072);
-  var2 = var2 + (((int64_t)bme_280_calibration_data.comp_dig_P4) * 34359738368);
-  var1 = ((var1 * var1 * (int64_t)bme_280_calibration_data.comp_dig_P3) / 256) + ((var1 * ((int64_t)bme_280_calibration_data.comp_dig_P2) * 4096));
-  var3 = ((int64_t)1) * 140737488355328;
-  var1 = (var3 + var1) * ((int64_t)bme_280_calibration_data.comp_dig_P1) / 8589934592;
-	
-  /* To avoid divide by zero exception */
-  if (var1 != 0){
-    var4 = 1048576 - bme_280_raw_data.press_raw;
-    var4 = (((var4 * 2147483648LL) - var2) * 3125) / var1;
-    var1 = (((int64_t)bme_280_calibration_data.comp_dig_P9) * (var4 / 8192) * (var4 / 8192)) / 33554432;
-    var2 = (((int64_t)bme_280_calibration_data.comp_dig_P8) * var4) / 524288;
-    var4 = ((var4 + var1 + var2) / 256) + (((int64_t)bme_280_calibration_data.comp_dig_P7) * 16);
-    pressure = (uint32_t)(((var4 / 2) * 100) / 128);
-
-    if (pressure < pressure_min){
-      pressure = pressure_min;
+    //Read Reg Data
+    HAL_GPIO_WritePin(BME280_CS_GPIO_Port, BME280_CS_Pin, GPIO_PIN_RESET);
+    HAL_StatusTypeDef status = HAL_SPI_TransmitReceive(hspi_ome280, tx_buffer, rx_buffer, length+1);
+    HAL_GPIO_WritePin(BME280_CS_GPIO_Port, BME280_CS_Pin, GPIO_PIN_SET);
+    if(status != HAL_OK){
+        return status;
     }
-    else if (pressure > pressure_max){
-      pressure = pressure_max;
+
+    //Copy Reg Data
+    for(uint8_t i = 0; i < length; i++){
+        reg_data[i] = rx_buffer[i+1];
     }
-	}
-  else{
-    pressure = pressure_min;
-  }
-  return pressure;
+
+    return status;
+
+};
+static HAL_StatusTypeDef bme280_write_reg(uint8_t reg_addr, uint8_t *reg_data){
+    //ADDR Not-Auto Incremented
+    //Set Buffer
+    uint8_t tx_buffer[2] = {0};
+
+    //Set Write Reg Addr
+    tx_buffer[0] = reg_addr;
+    //Set Write Reg Data
+    tx_buffer[1] = reg_data[0];
+
+    //Write Reg Data
+    HAL_GPIO_WritePin(BME280_CS_GPIO_Port, BME280_CS_Pin, GPIO_PIN_RESET);
+    HAL_StatusTypeDef status = HAL_SPI_Transmit(hspi_ome280, tx_buffer, 2, HAL_MAX_DELAY);
+    HAL_GPIO_WritePin(BME280_CS_GPIO_Port, BME280_CS_Pin, GPIO_PIN_SET);
+
+    return status;
+};
+
+void bme280_read_data(void){
+    //read press, temp, hum value in register
+    uint8_t reg_data[8] = {0};
+    bme280_read_reg(BME280_REG_PRESSURE_MSB, reg_data, 8);
+
+    if(status != HAL_OK){
+        return;
+    }
+    
+    //save data into struct bme280_data
+    bme280_data.pressure_msb_raw = reg_data[0];
+    bme280_data.pressure_lsb_raw = reg_data[1];
+    bme280_data.pressure_xlsb_raw = reg_data[2];
+
+    bme280_data.temp_msb_raw = reg_data[3];
+    bme280_data.temp_lsb_raw = reg_data[4];
+    bme280_data.temp_xlsb_raw = reg_data[5];
+
+    bme280_data.hum_msb_raw = reg_data[6];
+    bme280_data.hum_lsb_raw = reg_data[7];
+
+    //without parse data, just save raw data
+    bme280_data.pressure_uncompensated = (uint32_t)bme280_data.pressure_msb_raw << 12 | (uint32_t)bme280_data.pressure_lsb_raw << 4 | (uint32_t)bme280_data.pressure_xlsb_raw >> 4;
+    bme280_data.temperature_uncompensated = (uint32_t)bme280_data.temp_msb_raw << 12 | (uint32_t)bme280_data.temp_lsb_raw << 4 | (uint32_t)bme280_data.temp_xlsb_raw >> 4;
+    bme280_data.humidity_uncompensated = (uint32_t)bme280_data.hum_msb_raw << 8 | (uint32_t)bme280_data.hum_lsb_raw;
+
+};
+void bme280_read_config(void){
+    //read config value in register
+    uint8_t reg_data[1] = {0};
+    bme280_read_reg(BME280_REG_CONFIG, reg_data, 1);
+
+    if(status != HAL_OK){
+        return;
+    }
+
+    //save data into struct bme280_config
+    bme280_config.config_raw = reg_data[0];
+    
+    //parse config value
+    bme280_config.t_standby = (bme280_config.config_raw & 0xE0) >> 5;
+    bme280_config.filter = (bme280_config.config_raw & 0x1C) >> 2;
+    bme280_config.spi3w_en = bme280_config.config_raw & 0x01;
+
+};
+void bme280_read_ctrl_meas(void){
+    //read ctrl_meas value in register
+    uint8_t reg_data[1] = {0};
+    bme280_read_reg(BME280_REG_CTRL_MEAS, reg_data, 1);
+
+    if(status != HAL_OK){
+        return;
+    }
+
+    //save data into struct bme280_ctrl_meas
+    bme280_ctrl_meas.ctrl_meas_raw = reg_data[0];
+
+    //parse ctrl_meas value
+    bme280_ctrl_meas.osrs_t = (bme280_ctrl_meas.ctrl_meas_raw & 0xE0) >> 5;
+    bme280_ctrl_meas.osrs_p = (bme280_ctrl_meas.ctrl_meas_raw & 0x1C) >> 2;
+    bme280_ctrl_meas.mode = bme280_ctrl_meas.ctrl_meas_raw & 0x03;
+};
+void bme280_read_status(void){
+    //read status value in register
+    uint8_t reg_data[1] = {0};
+    bme280_read_reg(BME280_REG_STATUS, reg_data, 1);
+
+    if(status != HAL_OK){
+        return;
+    }
+
+    //save data into struct bme280_status
+    bme280_status.status_raw = reg_data[0];
+    
+    //parse status value
+    bme280_status.im_update = (bme280_status.status_raw & 0x08) >> 3;
+    bme280_status.measuring = bme280_status.status_raw & 0x01;
+};
+void bme280_read_ctrl_hum(void){
+    //read ctrl_hum value in register
+    uint8_t reg_data[1] = {0};
+    bme280_read_reg(BME280_REG_CTRL_HUM, reg_data, 1);
+
+    if(status != HAL_OK){
+        return;
+    }
+
+    //save data into struct bme280_ctrl_hum
+    bme280_ctrl_hum.ctrl_hum_raw = reg_data[0];
+
+    //parse ctrl_hum value
+    bme280_ctrl_hum.osrs_h = bme280_ctrl_hum.ctrl_hum_raw & 0x07;
+};
+void bme280_read_calibration(void){
+    uint8_t reg_data[24] = {0};
+    bme280_read_reg(0x88, reg_data, 24);
+
+    bme280_calibration.dig_T1 = (reg_data[1] << 8) | reg_data[0];
+    bme280_calibration.dig_T2 = (reg_data[3] << 8) | reg_data[2];
+    bme280_calibration.dig_T3 = (reg_data[5] << 8) | reg_data[4];
+
+    bme280_calibration.dig_P1 = (reg_data[7] << 8) | reg_data[6];
+    bme280_calibration.dig_P2 = (reg_data[9] << 8) | reg_data[8];
+    bme280_calibration.dig_P3 = (reg_data[11] << 8) | reg_data[10];
+    bme280_calibration.dig_P4 = (reg_data[13] << 8) | reg_data[12];
+    bme280_calibration.dig_P5 = (reg_data[15] << 8) | reg_data[14];
+    bme280_calibration.dig_P6 = (reg_data[17] << 8) | reg_data[16];
+    bme280_calibration.dig_P7 = (reg_data[19] << 8) | reg_data[18];
+    bme280_calibration.dig_P8 = (reg_data[19] << 8) | reg_data[18];
+    bme280_calibration.dig_P9 = (reg_data[19] << 8) | reg_data[18];
+
+    uint8_t reg_data_1[1] = {0};
+    bme280_read_reg(0xA1, reg_data_1, 1);
+    bme280_calibration.dig_H1 = reg_data_1[0];
+
+    uint8_t reg_data_2[7] = {0};
+    bme280_read_reg(0xE1, reg_data_2, 7);
+    bme280_calibration.dig_H2 = (reg_data_2[0] << 8) | reg_data_2[1];
+    bme280_calibration.dig_H3 = reg_data_2[2];
+    bme280_calibration.dig_H4 = (reg_data_2[3] << 4) | (reg_data_2[4] & 0x0F);
+    bme280_calibration.dig_H5 = (reg_data_2[5] << 4) | (reg_data_2[4] >> 4);
+    bme280_calibration.dig_H6 = reg_data_2[6];
+
 };
 
 
+void bme280_write_config(uint8_t t_sb_f, uint8_t filter_f, uint8_t spi3w_en_f){
+    //set config value in register
 
-static uint32_t bme280_Read_Humidity(void){
-     
-	int32_t var1; 
-	int32_t var2;
-  int32_t var3;
-  int32_t var4;
-  int32_t var5;
-	uint32_t humidity;
-  uint32_t humidity_max = 102400;
+    if (t_sb_f > 7) return;
+    if (filter_f > 7) return;
+    if (spi3w_en_f > 1) return;
+
+    bme280_config.config_raw = (t_sb_f << 5) | (filter_f << 2) | spi3w_en_f;
+    
+    uint8_t reg_data[1] = {0};
+    reg_data[0] = bme280_config.config_raw;
+    bme280_write_reg(BME280_REG_CONFIG, reg_data);
+
+    return;
+};
+void bme280_write_ctrl_meas(uint8_t osrs_t_f, uint8_t osrs_p_f, uint8_t mode_f){
+    //set ctrl_meas value in register
+    if (osrs_t_f > 7) return;
+    if (osrs_p_f > 7) return;
+    if (mode_f > 3) return;
+
+    bme280_ctrl_meas.ctrl_meas_raw = (osrs_t_f << 5) | (osrs_p_f << 2) | mode_f;
+    
+    uint8_t reg_data[1] = {0};
+    reg_data[0] = bme280_ctrl_meas.ctrl_meas_raw;
+    bme280_write_reg(BME280_REG_CTRL_MEAS, reg_data);
+
+    return;
+};
+void bme280_write_ctrl_hum(uint8_t osrs_h_f){
+    //set ctrl_hum value in register, must use bme280_write_ctrl_meas() first, then use this function.
+    if (osrs_h_f > 7) return;
+
+    bme280_ctrl_hum.ctrl_hum_raw = osrs_h_f;
+    
+    uint8_t reg_data[1] = {0};
+    reg_data[0] = bme280_ctrl_hum.ctrl_hum_raw;
+    bme280_write_reg(BME280_REG_CTRL_HUM, reg_data);
+
+    return;
+};
+void bme280_write_reset(void){
+    //set reset value in register
+    uint8_t reg_data[1] = {0};
+    reg_data[0] = 0xB6;
+    bme280_write_reg(BME280_REG_RESET, reg_data);
+
+    return;
+};
+void bme280_set_opr_mode(BME_280_OPR_MODE mode){
+    switch(){
+        case(WeatherMonitoring):
+            // SensorMode: Forced, 1sample/min
+            // OVSR Settings: press * 1, temp * 1, hum * 1
+            // IIR filter settings: OFF
+            bme280_write_config(5, 0, 0);
+            bme280_write_ctrl_meas(1, 1, 1);
+            bme280_write_ctrl_hum(1);
+            break;
+        case(HumiditySensing):
+            // SensorMode: Forced, 1sample/second
+            // OVSR Settings: press * 0, temp * 1, hum * 1
+            // IIR filter settings: OFF
+            bme280_write_config(5, 0, 0);
+            bme280_write_ctrl_meas(1, 0, 1);
+            bme280_write_ctrl_hum(1);
+            break;
+        case(IndoorNavigation):
+            // SensorMode: Normal, t_standby = 0.5ms
+            // OVSR Settings: press * 16, temp * 2, hum * 1
+            // IIR filter settings: x16
+            bme280_write_config(5, 4, 0);
+            bme280_write_ctrl_meas(2, 5, 3);
+            bme280_write_ctrl_hum(1);
+            break;
+        case(Gaming):
+            // SensorMode: Normal, t_standby = 0.5ms
+            // OVSR Settings: press * 4, temp * 1, hum * 0
+            // IIR filter settings: x16
+            bme280_write_config(5, 4, 0);
+            bme280_write_ctrl_meas(1, 3, 3);
+            bme280_write_ctrl_hum(1);
+            break;
+    }
+};
+
+void bme280_Init(BME_280_OPR_MODE mode){
+    bme280_write_reset();
+    bme280_set_opr_mode(mode);
+    bme280_read_calibration();
+};
+
+static double bme280_compensate_temperature(void){
+    double var1;
+    double var2;
+    double temperature;
+    double temperature_min = -40.0;
+    double temperature_max = 85.0;
+
+    var1 = (((double)bme280_data.temperature_uncompensated) / 16384.0 - ((double)bme280_calibration.dig_T1) / 1024.0);
+    var1 = var1 * ((double)bme280_calibration.dig_T2);
+    var2 = (((double)bme280_data.temperature_uncompensated) / 131072.0 - ((double)bme280_calibration.dig_T1) / 8192.0);
+    var2 = (var2 * var2) * ((double)bme280_calibration.dig_T3);
+    bme280_calibration.t_fine = (int32_t)(var1 + var2);
+    temperature = (var1 + var2) / 5120.0;
  
-  var1 = bme_280_calibration_data.t_fine - ((int32_t)76800);
-  var2 = (int32_t)(bme_280_raw_data.hum_raw * 16384);
-	var3 = (int32_t)(((int32_t)bme_280_calibration_data.comp_dig_H4) * 1048576);
-  var4 = ((int32_t)bme_280_calibration_data.comp_dig_H5) * var1;
-  var5 = (((var2 - var3) - var4) + (int32_t)16384) / 32768;
-  var2 = (var1 * ((int32_t)bme_280_calibration_data.comp_dig_H6)) / 1024;
-  var3 = (var1 * ((int32_t)bme_280_calibration_data.comp_dig_H3)) / 2048;
-  var4 = ((var2 * (var3 + (int32_t)32768)) / 1024) + (int32_t)2097152;
-  var2 = ((var4 * ((int32_t)bme_280_calibration_data.comp_dig_H2)) + 8192) / 16384;
-  var3 = var5 * var2;
-  var4 = ((var3 / 32768) * (var3 / 32768)) / 128;
-  var5 = var3 - ((var4 * ((int32_t)bme_280_calibration_data.comp_dig_H1)) / 16);
-  var5 = (var5 < 0 ? 0 : var5);
-  var5 = (var5 > 419430400 ? 419430400 : var5);
-  humidity = (uint32_t)(var5 / 4096);
+    if (temperature < temperature_min)
+    {
+         temperature = temperature_min;
+    }
+    else if (temperature > temperature_max)
+    {
+         temperature = temperature_max;
+    }
+ 
+    return temperature;
+
+};
+static double bme280_compensate_pressure(void){
+     double var1;
+     double var2;
+     double var3;
+     double pressure;
+     double pressure_min = 30000.0;
+     double pressure_max = 110000.0;
+ 
+     var1 = ((double)bme280_calibration.t_fine / 2.0) - 64000.0;
+     var2 = var1 * var1 * ((double)bme280_calibration.dig_P6) / 32768.0;
+     var2 = var2 + var1 * ((double)bme280_calibration.dig_P5) * 2.0;
+     var2 = (var2 / 4.0) + (((double)bme280_calibration.dig_P4) * 65536.0);
+     var3 = ((double)bme280_calibration.dig_P3) * var1 * var1 / 524288.0;
+     var1 = (var3 + ((double)bme280_calibration.dig_P2) * var1) / 524288.0;
+     var1 = (1.0 + var1 / 32768.0) * ((double)bme280_calibration.dig_P1);
+ 
+     /* Avoid exception caused by division by zero */
+     if (var1 > (0.0))
+     {
+         pressure = 1048576.0 - (double) bme280_data.pressure_uncompensated;
+         pressure = (pressure - (var2 / 4096.0)) * 6250.0 / var1;
+         var1 = ((double)bme280_calibration.dig_P9) * pressure * pressure / 2147483648.0;
+         var2 = pressure * ((double)bme280_calibration.dig_P8) / 32768.0;
+         pressure = pressure + (var1 + var2 + ((double)bme280_calibration.dig_P7)) / 16.0;
+ 
+         if (pressure < pressure_min)
+         {
+             pressure = pressure_min;
+         }
+         else if (pressure > pressure_max)
+         {
+             pressure = pressure_max;
+         }
+     }
+     else /* Invalid case */
+     {
+         pressure = pressure_min;
+     }
+ 
+     return pressure;
+};
+static double bme280_compensate_humidity(void){
+     double humidity;
+     double humidity_min = 0.0;
+     double humidity_max = 100.0;
+     double var1;
+     double var2;
+     double var3;
+     double var4;
+     double var5;
+     double var6;
+ 
+     var1 = ((double)bme280_calibration.t_fine) - 76800.0;
+     var2 = (((double)bme280_calibration.dig_H4) * 64.0 + (((double)bme280_calibration.dig_H5) / 16384.0) * var1);
+     var3 = (double) bme280_data.humidity_uncompensated - var2;
+     var4 = ((double)bme280_calibration.dig_H2) / 65536.0;
+     var5 = (1.0 + (((double)bme280_calibration.dig_H3) / 67108864.0) * var1);
+     var6 = 1.0 + (((double)bme280_calibration.dig_H6) / 67108864.0) * var1 * var5;
+     var6 = var3 * var4 * (var5 * var6);
+     humidity = var6 * (1.0 - ((double)bme280_calibration.dig_H1) * var6 / 524288.0);
  
      if (humidity > humidity_max)
      {
          humidity = humidity_max;
      }
+     else if (humidity < humidity_min)
+     {
+         humidity = humidity_min;
+     }
  
      return humidity;
 };
 
-void bme280_parse_data(void){
 
-	bme_280_data.temperature = bme280_Read_Temperature();
-	bme_280_data.pressure = bme280_Read_Pressure();
-	bme_280_data.humidity = bme280_Read_Humidity();
-	
+void bme280_Data_Parse(void){
+    double bme280_compensate_temperature(void);
+    double bme280_compensate_pressure(void);
+    double bme280_compensate_humidity(void);
+
 };
